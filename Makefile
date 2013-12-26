@@ -2,11 +2,11 @@ CC      = gcc
 CFLAGS  = -g -Wall
 DEFS    =
 INCDIR  = ./
-OBJ     = wr.o proc.o
+OBJ     = mkbench.o proc.o
 
-all: wr
+all: mkbench
 
-wr: $(OBJ)
+mkbench: $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ)
 
 clean:

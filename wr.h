@@ -24,12 +24,13 @@
 
 #define WR_FALSE     0
 #define WR_TRUE      !WR_FALSE
-#define WR_VERSION   "0.1"
+#define WR_VERSION   "0.2"
 
 /* Concurrency defaults */
 #define WR_CONC_FROM 100
 #define WR_CONC_TO   500
 #define WR_CONC_STEP 20
+#define WR_THREADS   1
 #define WR_REQUESTS  500000
 
 /* Kernel details */
@@ -49,6 +50,6 @@ int wr_cpu_hz;
 
 
 /* Benchmark tool details */
-#define BC_BIN "weighttp -t 10 -n %i -c %i %s %s"
+#define BC_BIN "weighttp -t %i -n %i -c %i %s %s"
 
 #endif

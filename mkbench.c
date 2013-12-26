@@ -34,10 +34,11 @@ static void wr_banner()
 
 static void wr_help()
 {
-    printf("Usage: ./wr [-c N] [-l N] [-s N] -p PID http://URL\n\n");
+    printf("Usage: ./mkbench [-c N] [-l N] [-s N] -p PID http://URL\n\n");
     printf("%sAvailable options%s\n", ANSI_BOLD, ANSI_RESET);
     printf("  -r  \tnumber of requests (default: %i)\n", WR_REQUESTS);
     printf("  -c  \tinitial concurrency (default: %i)\n", WR_CONC_FROM);
+    printf("  -t  \tnumber of threads (default: %i)\n", WR_THREADS);
     printf("  -l  \tmax concurrency after each step (default: %i)\n", WR_CONC_TO);
     printf("  -s  \tnumber of concurrency steps (default: %i)\n", WR_CONC_STEP);
     printf("  -v  \tshow version number\n");
@@ -120,6 +121,7 @@ int main(int argc, char **argv)
     int conc_step  = WR_CONC_STEP;
     int conc_bench = conc_from;
     int requests   = WR_REQUESTS;
+    int threads    = WR_THREADS;
     long req_sec   = 0;
     const size_t buf_size = 4096;
     char buf[buf_size];
@@ -129,7 +131,7 @@ int main(int argc, char **argv)
 
     wr_banner();
 
-    while ((opt = getopt(argc, argv, "vhkr:c:s:l:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "vhkr:c:t:s:l:p:")) != -1) {
         switch (opt) {
         case 'v':
             wr_version();
@@ -145,6 +147,9 @@ int main(int argc, char **argv)
             break;
         case 'c':
             conc_from = atoi(optarg);
+            break;
+        case 't':
+            threads = atoi(optarg);
             break;
         case 'l':
             conc_to = atoi(optarg);
@@ -175,6 +180,13 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    /* Validate input arguments, do not mess up with weighttp */
+    if (threads > requests || threads > conc_from || conc_from > requests) {
+        printf("Error: insane arguments\n\n");
+        wr_help();
+        exit(EXIT_FAILURE);
+    }
+
     /* Kernel information: PAGESIZE and CPU_HZ */
     wr_pagesize  = sysconf(_SC_PAGESIZE);
     wr_cpu_hz    = sysconf(_SC_CLK_TCK);
@@ -190,6 +202,7 @@ int main(int argc, char **argv)
     /* Command */
     memset(buf, '\0', sizeof(buf));
     snprintf(buf, buf_size - 1, BC_BIN,
+             threads,
              requests, conc_from, keepalive > 0 ? "-k": "", argv[argc - 1]);
     printf("Command     : '%s'\n\n", buf);
 
@@ -206,8 +219,8 @@ int main(int argc, char **argv)
 
         printf("%11ld %16ld %15ld %17ld %12ld %11s\n",
                conc_bench,
-               req_sec,                                              /* request per second */
-               (task_new->wr_utime_ms - task_old->wr_utime_ms),      /* user time in ms    */
+               req_sec,                                         /* request per second */
+               (task_new->wr_utime_ms - task_old->wr_utime_ms), /* user time in ms    */
                (task_new->wr_stime_ms - task_old->wr_stime_ms),
                task_new->wr_rss,
                task_new->wr_rss_hr);
@@ -218,6 +231,7 @@ int main(int argc, char **argv)
         conc_bench += conc_step;
         memset(buf, '\0', sizeof(buf));
         snprintf(buf, buf_size - 1, BC_BIN,
+                 threads,
                  requests, conc_bench, keepalive > 0 ? "-k": "", argv[argc - 1]);
     }
 
