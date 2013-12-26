@@ -115,14 +115,14 @@ int main(int argc, char **argv)
 {
     int opt;
     int pid = -1;
-    int keepalive  = 0;
-    int conc_from  = WR_CONC_FROM;
-    int conc_to    = WR_CONC_TO;
-    int conc_step  = WR_CONC_STEP;
-    int conc_bench = conc_from;
-    int requests   = WR_REQUESTS;
-    int threads    = WR_THREADS;
-    long req_sec   = 0;
+    int keepalive   = 0;
+    int conc_from   = WR_CONC_FROM;
+    int conc_to     = WR_CONC_TO;
+    int conc_step   = WR_CONC_STEP;
+    int conc_bench  = conc_from;
+    int requests    = WR_REQUESTS;
+    int threads     = WR_THREADS;
+    long req_sec    = 0;
     const size_t buf_size = 4096;
     char buf[buf_size];
     time_t init_time;
@@ -217,7 +217,7 @@ int main(int argc, char **argv)
         req_sec = spawn_benchmark(buf);
         task_new = wr_proc_stat(pid);
 
-        printf("%11ld %16ld %15ld %17ld %12ld %11s\n",
+        printf("%11i %16ld %15ld %17ld %12ld %11s\n",
                conc_bench,
                req_sec,                                         /* request per second */
                (task_new->wr_utime_ms - task_old->wr_utime_ms), /* user time in ms    */
