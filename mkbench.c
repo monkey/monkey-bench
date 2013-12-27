@@ -36,11 +36,13 @@ static void wr_help()
 {
     printf("Usage: ./mkbench [-c N] [-l N] [-s N] -p PID http://URL\n\n");
     printf("%sAvailable options%s\n", ANSI_BOLD, ANSI_RESET);
+    printf("  -p  \tserver process ID to test\n");
     printf("  -r  \tnumber of requests (default: %i)\n", WR_REQUESTS);
     printf("  -c  \tinitial concurrency (default: %i)\n", WR_CONC_FROM);
     printf("  -t  \tnumber of threads (default: %i)\n", WR_THREADS);
     printf("  -l  \tmax concurrency after each step (default: %i)\n", WR_CONC_TO);
     printf("  -s  \tnumber of concurrency steps (default: %i)\n", WR_CONC_STEP);
+    printf("  -N  \tdo not gather system resources usage\n");
     printf("  -v  \tshow version number\n");
     printf("  -h, \tprint this help\n\n");
     fflush(stdout);
@@ -155,6 +157,7 @@ int main(int argc, char **argv)
     int opt;
     int pid = -1;
     int ret;
+    int disable_stats = 0;
     int keepalive   = 0;
     int conc_from   = WR_CONC_FROM;
     int conc_to     = WR_CONC_TO;
@@ -174,7 +177,7 @@ int main(int argc, char **argv)
 
     wr_banner();
 
-    while ((opt = getopt(argc, argv, "vhkr:c:t:s:l:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "vhkr:c:t:s:l:p:N")) != -1) {
         switch (opt) {
         case 'v':
             wr_version();
@@ -203,6 +206,9 @@ int main(int argc, char **argv)
         case 'p':
             pid = atoi(optarg);
             break;
+        case 'N':
+            disable_stats = 1;
+            break;
         case '?':
             printf("Error: Invalid option or option needs an argument.\n");
             wr_help();
@@ -210,7 +216,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (pid <= 0) {
+    if (pid <= 0 && disable_stats == 0) {
         printf("Error: Process ID (PID) not specified\n\n");
         wr_help();
         exit(EXIT_FAILURE);
@@ -221,13 +227,15 @@ int main(int argc, char **argv)
     wr_cpu_hz    = sysconf(_SC_CLK_TCK);
 
     /* Check PID children */
-    childs_count = childs_size;
-    childs = malloc(sizeof(struct wr_proc_task) * childs_size);
-    ret = wr_proc_get_childs(pid, &childs, &childs_count);
-    if (ret == -1) {
-        printf("Error: failed processing process children.\n");
-        wr_help();
-        exit(EXIT_FAILURE);
+    if (disable_stats == 0) {
+        childs_count = childs_size;
+        childs = malloc(sizeof(struct wr_proc_task) * childs_size);
+        ret = wr_proc_get_childs(pid, &childs, &childs_count);
+        if (ret == -1) {
+            printf("Error: failed processing process children.\n");
+            wr_help();
+            exit(EXIT_FAILURE);
+        }
     }
 
     /* Get the URL */
@@ -245,20 +253,21 @@ int main(int argc, char **argv)
     }
 
     /* Initial details */
-    task_old = wr_proc_stat(pid);
-    printf("Process ID   : %i\n", pid);
-    printf("Process name : %s\n", task_old->comm);
-    printf("Childs found : %i\n", childs_count);
-    if (childs_count > 0) {
-        int i;
-        struct wr_proc_task *t;
-        for (i = 0 ; i < childs_count; i++) {
-            t = (&childs)[i];
-            printf("               pid=%i (%s)\n", t->pid, t->comm);
+    if (disable_stats == 0) {
+        task_old = wr_proc_stat(pid);
+        printf("Process ID   : %i\n", pid);
+        printf("Process name : %s\n", task_old->comm);
+        printf("Childs found : %i\n", childs_count);
+        if (childs_count > 0) {
+            int i;
+            struct wr_proc_task *t;
+            for (i = 0 ; i < childs_count; i++) {
+                t = (&childs)[i];
+                printf("               pid=%i (%s)\n", t->pid, t->comm);
+            }
         }
+        wr_proc_free(task_old);
     }
-
-    wr_proc_free(task_old);
 
     printf("Concurrency  : from %i to %i, step %i\n", conc_from, conc_to, conc_step);
 
@@ -278,20 +287,27 @@ int main(int argc, char **argv)
     init_time = time(NULL);
     conc_bench = conc_from;
     while (conc_bench <= conc_to) {
-        task_old = bench_stats_sum(pid, &childs, childs_count);
-        req_sec  = spawn_benchmark(buf);
-        task_new = bench_stats_sum(pid, &childs, childs_count);
+        if (disable_stats) {
+            req_sec  = spawn_benchmark(buf);
+            printf("%11i %16ld\n",
+                   conc_bench,
+                   req_sec);
+        }
+        else {
+            task_old = bench_stats_sum(pid, &childs, childs_count);
+            req_sec  = spawn_benchmark(buf);
+            task_new = bench_stats_sum(pid, &childs, childs_count);
 
-        printf("%11i %16ld %15ld %17ld %12ld %11s\n",
-               conc_bench,
-               req_sec,                                         /* request per second */
-               (task_new->wr_utime_ms - task_old->wr_utime_ms), /* user time in ms    */
-               (task_new->wr_stime_ms - task_old->wr_stime_ms),
-               task_new->wr_rss,
-               task_new->wr_rss_hr);
-        wr_proc_free(task_old);
-        wr_proc_free(task_new);
-
+            printf("%11i %16ld %15ld %17ld %12ld %11s\n",
+                   conc_bench,
+                   req_sec,
+                   (task_new->wr_utime_ms - task_old->wr_utime_ms),
+                   (task_new->wr_stime_ms - task_old->wr_stime_ms),
+                   task_new->wr_rss,
+                   task_new->wr_rss_hr);
+            wr_proc_free(task_old);
+            wr_proc_free(task_new);
+        }
         /* Prepare the command */
         conc_bench += conc_step;
         memset(buf, '\0', sizeof(buf));
