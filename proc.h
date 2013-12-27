@@ -86,7 +86,10 @@ struct wr_proc_task {
     unsigned long  wr_stime_ms;       /* milliseconds = ((utime * 1000) / CPU_HZ) */
 };
 
+char *human_readable_size(long size);
 struct wr_proc_task *wr_proc_stat(pid_t pid);
+int wr_proc_get_childs(pid_t ppid, struct wr_proc_task **childs, int *count);
+char *wr_proc_cmdline(pid_t pid);
 void wr_proc_free(struct wr_proc_task *t);
 void wr_proc_print(struct wr_proc_task *t);
 

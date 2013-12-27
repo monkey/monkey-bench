@@ -21,14 +21,15 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
 #include <stdlib.h>
-#include <sys/types.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include "wr.h"
 #include "proc.h"
 
-static char *human_readable_size(long size)
+char *human_readable_size(long size)
 {
     long u = 1024, i, len = 128;
     char *buf = malloc(len);
@@ -90,6 +91,74 @@ static char *file_to_buffer(const char *path)
     return (char *) buffer;
 }
 
+/*
+ * Given a Parent process ID, it store the child process ID on the childs
+ * array and set the number of PIDs stored on count. Initially count also
+ * serve to give the childs size in terms of slots. Under any error the
+ * function returns -1.
+ */
+int wr_proc_get_childs(pid_t ppid, struct wr_proc_task **childs, int *count)
+{
+    pid_t p;
+    DIR *dir;
+    int childs_count = 0;
+    int childs_size  = *count;
+    struct dirent *ent;
+    struct wr_proc_task *s;
+
+    /*
+     * first step is to scan the whole content of /proc/ to find out the
+     * processes available
+     */
+    dir = opendir("/proc/");
+    if (!dir) {
+        return -1;
+    }
+
+    while ((ent = readdir(dir)) != NULL) {
+        if ((ent->d_name[0] == '.') || (strncmp(ent->d_name, "..", 2) == 0)) {
+            continue;
+        }
+
+        /* just directories */
+        if (ent->d_type != DT_DIR) {
+            continue;
+        }
+
+        /* only numeric values */
+        p = atol(ent->d_name);
+        if (p <= 0) {
+            continue;
+        }
+
+        s = wr_proc_stat(p);
+        if (s->ppid == ppid) {
+            if (childs_count >= childs_size) {
+                wr_proc_free(s);
+                *count = childs_count;
+                return 0;
+            }
+            childs[childs_count] = s;
+            childs_count++;
+        }
+        else {
+            wr_proc_free(s);
+        }
+    }
+
+    *count = childs_count;
+    closedir(dir);
+
+    return 0;
+}
+
+char *wr_proc_cmdline(pid_t pid)
+{
+    char target[PROC_PID_SIZE];
+
+    snprintf(target, sizeof(PROC_PID_SIZE) -1, "/proc/%i/cmdline", pid);
+    return file_to_buffer(target);
+}
 
 struct wr_proc_task *wr_proc_stat(pid_t pid)
 {

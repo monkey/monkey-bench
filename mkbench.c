@@ -50,6 +50,45 @@ static void wr_version()
 {
 }
 
+/*
+ * Given a parent ID process and the list of childs, perform a sumatory of
+ * basic statistics over fields wr_rss, wr_utime_ms and wr_stime_ms.
+ */
+static struct wr_proc_task *bench_stats_sum(pid_t ppid,
+                                            struct wr_proc_task **childs,
+                                            int childs_count)
+{
+    int i;
+    char *tmp;
+    struct wr_proc_task *child;
+    struct wr_proc_task *st;
+    struct wr_proc_task *final;
+
+    final = wr_proc_stat(ppid);
+
+    for (i = 0; i < childs_count; i++) {
+        child = (childs)[i];
+
+        st = wr_proc_stat(child->pid);
+
+        final->wr_rss      += st->wr_rss;
+        final->wr_utime_ms += st->wr_utime_ms;
+        final->wr_stime_ms += st->wr_stime_ms;
+
+        wr_proc_free(st);
+    }
+
+    /* Get the average usage after sumatory */
+    final->wr_rss      /= (childs_count + 1);
+    tmp = human_readable_size(final->wr_rss);
+    free(final->wr_rss_hr);
+    final->wr_rss_hr = tmp;
+    final->wr_utime_ms /= (childs_count + 1);
+    final->wr_stime_ms /= (childs_count + 1);
+
+    return final;
+}
+
 long spawn_benchmark(const char *cmd)
 {
     char *s, *p;
@@ -115,6 +154,7 @@ int main(int argc, char **argv)
 {
     int opt;
     int pid = -1;
+    int ret;
     int keepalive   = 0;
     int conc_from   = WR_CONC_FROM;
     int conc_to     = WR_CONC_TO;
@@ -122,12 +162,15 @@ int main(int argc, char **argv)
     int conc_bench  = conc_from;
     int requests    = WR_REQUESTS;
     int threads     = WR_THREADS;
+    int childs_size = 256;
+    int childs_count;
     long req_sec    = 0;
     const size_t buf_size = 4096;
     char buf[buf_size];
     time_t init_time;
     time_t end_time;
     struct wr_proc_task *task_old, *task_new;
+    struct wr_proc_task *childs;
 
     wr_banner();
 
@@ -173,6 +216,20 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    /* Kernel information: PAGESIZE and CPU_HZ */
+    wr_pagesize  = sysconf(_SC_PAGESIZE);
+    wr_cpu_hz    = sysconf(_SC_CLK_TCK);
+
+    /* Check PID children */
+    childs_count = childs_size;
+    childs = malloc(sizeof(struct wr_proc_task) * childs_size);
+    ret = wr_proc_get_childs(pid, &childs, &childs_count);
+    if (ret == -1) {
+        printf("Error: failed processing process children.\n");
+        wr_help();
+        exit(EXIT_FAILURE);
+    }
+
     /* Get the URL */
     if (strncmp(argv[argc - 1], "http", 4) != 0) {
         printf("Error: Invalid URL\n\n");
@@ -187,35 +244,43 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    /* Kernel information: PAGESIZE and CPU_HZ */
-    wr_pagesize  = sysconf(_SC_PAGESIZE);
-    wr_cpu_hz    = sysconf(_SC_CLK_TCK);
-
     /* Initial details */
     task_old = wr_proc_stat(pid);
-    printf("Process ID  : %i\n", pid);
-    printf("Process name: %s\n", task_old->comm);
+    printf("Process ID   : %i\n", pid);
+    printf("Process name : %s\n", task_old->comm);
+    printf("Childs found : %i\n", childs_count);
+    if (childs_count > 0) {
+        int i;
+        struct wr_proc_task *t;
+        for (i = 0 ; i < childs_count; i++) {
+            t = (&childs)[i];
+            printf("               pid=%i (%s)\n", t->pid, t->comm);
+        }
+    }
+
     wr_proc_free(task_old);
 
-    printf("Concurrency : from %i to %i, step %i\n", conc_from, conc_to, conc_step);
+    printf("Concurrency  : from %i to %i, step %i\n", conc_from, conc_to, conc_step);
 
     /* Command */
     memset(buf, '\0', sizeof(buf));
     snprintf(buf, buf_size - 1, BC_BIN,
              threads,
              requests, conc_from, keepalive > 0 ? "-k": "", argv[argc - 1]);
-    printf("Command     : '%s'\n\n", buf);
+    printf("Command      : %s\n\n", buf);
 
     /* Table header */
-    printf("concurrency  requests/second  user time (ms)  system time (ms)  Mem (bytes)   Mem unit \n");
-    printf("-----------  ---------------  --------------  ----------------  -----------   ---------\n");
+    printf("concurrency  requests/second  user time (ms)  "
+           "system time (ms)  Mem (bytes)   Mem unit \n"
+           "-----------  ---------------  --------------  "
+           "----------------  -----------   ---------\n");
 
     init_time = time(NULL);
     conc_bench = conc_from;
     while (conc_bench <= conc_to) {
-        task_old = wr_proc_stat(pid);
-        req_sec = spawn_benchmark(buf);
-        task_new = wr_proc_stat(pid);
+        task_old = bench_stats_sum(pid, &childs, childs_count);
+        req_sec  = spawn_benchmark(buf);
+        task_new = bench_stats_sum(pid, &childs, childs_count);
 
         printf("%11i %16ld %15ld %17ld %12ld %11s\n",
                conc_bench,
